@@ -61,6 +61,46 @@ export async function organizeCurrentWindowTabs(): Promise<OrganizeTabsResult> {
   }
 }
 
+export async function organizeSingleTab(tab: chrome.tabs.Tab): Promise<void> {
+  if (tab.pinned || tab.id === undefined) {
+    return
+  }
+
+  const categoryRules = await loadCategoryRules()
+  const category = classifyTab(tab, categoryRules)
+  const existingGroupId = await findMatchingGroupId(tab.windowId, category.name)
+
+  if (existingGroupId === tab.groupId) {
+    await chrome.tabGroups.update(existingGroupId, {
+      title: category.name,
+      color: category.color,
+    })
+    return
+  }
+
+  const groupId = await chrome.tabs.group({
+    tabIds: tab.id,
+    ...(existingGroupId === undefined ? {} : { groupId: existingGroupId }),
+  })
+
+  await chrome.tabGroups.update(groupId, {
+    title: category.name,
+    color: category.color,
+  })
+}
+
+async function findMatchingGroupId(
+  windowId: number,
+  categoryName: string,
+): Promise<number | undefined> {
+  const existingGroups = await chrome.tabGroups.query({
+    title: categoryName,
+    windowId,
+  })
+
+  return existingGroups[0]?.id
+}
+
 function toTabGroupIds(tabIds: number[]): number | [number, ...number[]] {
   if (tabIds.length === 1) {
     return tabIds[0]

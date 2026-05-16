@@ -7,9 +7,14 @@ import {
 } from './categories'
 
 const storageKey = 'tabflowCategoryRules'
+const autoOrganizeStorageKey = 'tabflowAutoOrganizeEnabled'
 
 type StoredCategoryRules = {
   [storageKey]?: TabCategoryRule[]
+}
+
+type StoredAutoOrganizeSetting = {
+  [autoOrganizeStorageKey]?: boolean
 }
 
 export async function loadCategoryRules(): Promise<TabCategoryRule[]> {
@@ -37,13 +42,30 @@ export async function resetCategoryRules(): Promise<TabCategoryRule[]> {
   return defaultCategories
 }
 
+export async function loadAutoOrganizeEnabled(): Promise<boolean> {
+  const storedSettings = await chrome.storage.sync.get(autoOrganizeStorageKey)
+  const storedValue = (storedSettings as StoredAutoOrganizeSetting)[
+    autoOrganizeStorageKey
+  ]
+
+  return storedValue === true
+}
+
+export async function saveAutoOrganizeEnabled(
+  isEnabled: boolean,
+): Promise<void> {
+  await chrome.storage.sync.set({
+    [autoOrganizeStorageKey]: isEnabled,
+  })
+}
+
 function normalizeCategoryRules(categories: TabCategoryRule[]): TabCategoryRule[] {
   const defaultCategories = createDefaultCategoryRules()
   const categoriesById = new Map(
     categories.map((category) => [category.id, category]),
   )
 
-  return defaultCategories.map((defaultCategory) => {
+  const normalizedDefaultCategories = defaultCategories.map((defaultCategory) => {
     const savedCategory = categoriesById.get(defaultCategory.id)
 
     if (!savedCategory) {
@@ -54,11 +76,63 @@ function normalizeCategoryRules(categories: TabCategoryRule[]): TabCategoryRule[
       ...defaultCategory,
       name: savedCategory.name.trim() || defaultCategory.name,
       color: normalizeColor(savedCategory.color, defaultCategory.color),
+      includedCategoryIds: [],
       patterns:
         defaultCategory.id === fallbackCategoryId
           ? []
           : normalizePatterns(savedCategory.patterns),
     }
+  })
+
+  const defaultCategoryIds = new Set(
+    defaultCategories.map((category) => category.id),
+  )
+  const customCategories = categories
+    .filter((category) => !defaultCategoryIds.has(category.id))
+    .map(normalizeCustomCategory)
+    .filter((category): category is TabCategoryRule => category !== undefined)
+
+  return [...normalizedDefaultCategories, ...customCategories]
+}
+
+function normalizeCustomCategory(
+  category: TabCategoryRule,
+): TabCategoryRule | undefined {
+  const name = category.name.trim()
+  const patterns = normalizePatterns(category.patterns)
+  const includedCategoryIds = normalizeIncludedCategoryIds(
+    category.includedCategoryIds,
+  )
+
+  if (name.length === 0 || (patterns.length === 0 && includedCategoryIds.length === 0)) {
+    return undefined
+  }
+
+  return {
+    id: category.id,
+    name,
+    color: normalizeColor(category.color, 'grey'),
+    patterns,
+    includedCategoryIds,
+  }
+}
+
+function normalizeIncludedCategoryIds(
+  categoryIds: TabCategoryRule['includedCategoryIds'],
+): TabCategoryRule['id'][] {
+  if (!Array.isArray(categoryIds)) {
+    return []
+  }
+
+  return categoryIds.filter((categoryId, index, allCategoryIds) => {
+    if (
+      categoryId === fallbackCategoryId ||
+      categoryId.startsWith('custom-')
+    ) {
+      return false
+    }
+
+    return allCategoryIds.indexOf(categoryId) === index
   })
 }
 

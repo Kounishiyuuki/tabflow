@@ -3,6 +3,7 @@ import { extensionName } from '../lib/extension'
 import {
   fallbackCategoryId,
   tabGroupColors,
+  type TabCategoryId,
   type TabCategoryRule,
   type TabGroupColor,
 } from '../lib/categories'
@@ -11,6 +12,7 @@ import {
   resetCategoryRules,
   saveCategoryRules,
 } from '../lib/settings'
+import { organizeCurrentWindowTabs } from '../lib/organizeTabs'
 
 type SaveStatus = {
   tone: 'idle' | 'success' | 'error'
@@ -21,6 +23,12 @@ export function Options() {
   const [categories, setCategories] = useState<TabCategoryRule[]>([])
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [quickPattern, setQuickPattern] = useState('')
+  const [customGroupName, setCustomGroupName] = useState('')
+  const [customGroupColor, setCustomGroupColor] = useState<TabGroupColor>('grey')
+  const [customGroupPatterns, setCustomGroupPatterns] = useState([''])
+  const [includedCategoryIds, setIncludedCategoryIds] = useState<
+    TabCategoryId[]
+  >([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [status, setStatus] = useState<SaveStatus>({
@@ -57,9 +65,10 @@ export function Options() {
       await saveCategoryRules(categories)
       const savedCategories = await loadCategoryRules()
       setCategories(savedCategories)
+      await applySettingsToCurrentWindow()
       setStatus({
         tone: 'success',
-        message: 'Settings saved.',
+        message: 'Settings saved and applied to the current window.',
       })
     } catch (error) {
       setStatus({
@@ -87,9 +96,10 @@ export function Options() {
       const defaultCategories = await resetCategoryRules()
       setCategories(defaultCategories)
       setSelectedCategoryId(getFirstEditableCategoryId(defaultCategories))
+      await applySettingsToCurrentWindow()
       setStatus({
         tone: 'success',
-        message: 'Default rules restored.',
+        message: 'Default rules restored and applied to the current window.',
       })
     } catch (error) {
       setStatus({
@@ -153,15 +163,87 @@ export function Options() {
       const savedCategories = await loadCategoryRules()
       setCategories(savedCategories)
       setQuickPattern('')
+      await applySettingsToCurrentWindow()
       setStatus({
         tone: 'success',
-        message: `Added ${pattern} to ${selectedCategory.name}.`,
+        message: `Added ${pattern} to ${selectedCategory.name} and applied changes.`,
       })
     } catch (error) {
       setStatus({
         tone: 'error',
         message:
           error instanceof Error ? error.message : 'Unable to add pattern.',
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleCreateCustomGroup() {
+    const groupName = customGroupName.trim()
+    const patterns = normalizePatternInputs(customGroupPatterns)
+
+    if (groupName.length === 0) {
+      setStatus({
+        tone: 'error',
+        message: 'Enter a custom group name before saving.',
+      })
+      return
+    }
+
+    const hasDuplicateGroupName = categories.some(
+      (category) => category.name.trim().toLowerCase() === groupName.toLowerCase(),
+    )
+
+    if (hasDuplicateGroupName) {
+      setStatus({
+        tone: 'error',
+        message: `${groupName} already exists. Choose a different group name.`,
+      })
+      return
+    }
+
+    if (patterns.length === 0 && includedCategoryIds.length === 0) {
+      setStatus({
+        tone: 'error',
+        message:
+          'Add at least one pattern or included category before saving a custom group.',
+      })
+      return
+    }
+
+    const customCategory: TabCategoryRule = {
+      id: createCustomCategoryId(),
+      name: groupName,
+      color: customGroupColor,
+      patterns,
+      includedCategoryIds,
+    }
+    const updatedCategories = [...categories, customCategory]
+
+    setIsSaving(true)
+
+    try {
+      await saveCategoryRules(updatedCategories)
+      const savedCategories = await loadCategoryRules()
+      setCategories(savedCategories)
+      setSelectedCategoryId(customCategory.id)
+      setCustomGroupName('')
+      setCustomGroupColor('grey')
+      setCustomGroupPatterns([''])
+      setIncludedCategoryIds([])
+      await applySettingsToCurrentWindow()
+      setStatus({
+        tone: 'success',
+        message: `Created ${groupName} and applied changes to the current window.`,
+      })
+    } catch (error) {
+      setStatus({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Unable to create custom group.',
       })
     } finally {
       setIsSaving(false)
@@ -212,6 +294,28 @@ export function Options() {
     )
   }
 
+  function addCustomGroupPatternInput() {
+    setCustomGroupPatterns((currentPatterns) => [...currentPatterns, ''])
+  }
+
+  function updateCustomGroupPattern(patternIndex: number, pattern: string) {
+    setCustomGroupPatterns((currentPatterns) =>
+      currentPatterns.map((currentPattern, currentIndex) =>
+        currentIndex === patternIndex ? pattern : currentPattern,
+      ),
+    )
+  }
+
+  function removeCustomGroupPatternInput(patternIndex: number) {
+    setCustomGroupPatterns((currentPatterns) => {
+      const remainingPatterns = currentPatterns.filter(
+        (_pattern, currentIndex) => currentIndex !== patternIndex,
+      )
+
+      return remainingPatterns.length === 0 ? [''] : remainingPatterns
+    })
+  }
+
   function removePattern(categoryId: string, patternIndex: number) {
     setCategories((currentCategories) =>
       currentCategories.map((category) => {
@@ -237,6 +341,41 @@ export function Options() {
       currentCategories.map((category) =>
         category.id === categoryId ? { ...category, ...updates } : category,
       ),
+    )
+  }
+
+  async function handleApplyChangesNow() {
+    setIsSaving(true)
+
+    try {
+      await saveCategoryRules(categories)
+      const savedCategories = await loadCategoryRules()
+      setCategories(savedCategories)
+      const result = await organizeCurrentWindowTabs()
+      setStatus({
+        tone: result.ok ? 'success' : 'error',
+        message: result.ok
+          ? `Applied settings. ${result.message}`
+          : result.message,
+      })
+    } catch (error) {
+      setStatus({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? `Unable to apply changes: ${error.message}`
+            : 'Unable to apply changes.',
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  function toggleIncludedCategory(categoryId: TabCategoryId) {
+    setIncludedCategoryIds((currentCategoryIds) =>
+      currentCategoryIds.includes(categoryId)
+        ? currentCategoryIds.filter((currentCategoryId) => currentCategoryId !== categoryId)
+        : [...currentCategoryIds, categoryId],
     )
   }
 
@@ -284,6 +423,14 @@ export function Options() {
               className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
             >
               Reset to defaults
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyChangesNow}
+              disabled={isSaving || isLoading}
+              className="rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-800 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              Apply changes now
             </button>
           </div>
           <p className={`rounded-md border px-3 py-2 text-sm ${statusClassName}`}>
@@ -349,6 +496,127 @@ export function Options() {
                 Add
               </button>
             </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="grid gap-1">
+              <h2 className="text-lg font-semibold text-slate-950">
+                Create custom group
+              </h2>
+              <p className="text-sm leading-6 text-slate-500">
+                Create a new tab group label with its own color and matching
+                patterns. The display name becomes the Chrome tab group title.
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_180px]">
+              <label className="grid gap-2 text-sm font-medium text-slate-700">
+                Group display name
+                <input
+                  type="text"
+                  value={customGroupName}
+                  onChange={(event) => setCustomGroupName(event.target.value)}
+                  placeholder="AI x Git"
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-sky-600"
+                />
+              </label>
+
+              <label className="grid gap-2 text-sm font-medium text-slate-700">
+                Group color
+                <select
+                  value={customGroupColor}
+                  onChange={(event) =>
+                    setCustomGroupColor(event.target.value as TabGroupColor)
+                  }
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm capitalize text-slate-950 outline-none focus:border-sky-600"
+                >
+                  {tabGroupColors.map((color) => (
+                    <option key={color} value={color}>
+                      {color}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4">
+              <div className="mb-5">
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Included categories
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  Select existing categories to merge into this custom group.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {getIncludeableCategories(categories).map((category) => (
+                    <label
+                      key={category.id}
+                      className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={includedCategoryIds.includes(category.id)}
+                        onChange={() => toggleIncludedCategory(category.id)}
+                      />
+                      {category.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Patterns
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Add one or more domains, keywords, or Japanese title text.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addCustomGroupPatternInput}
+                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+                >
+                  Add pattern
+                </button>
+              </div>
+
+              <div className="mt-3 grid gap-2">
+                {customGroupPatterns.map((pattern, patternIndex) => (
+                  <div
+                    key={`custom-group-pattern-${patternIndex}`}
+                    className="grid gap-2 sm:grid-cols-[1fr_auto]"
+                  >
+                    <input
+                      type="text"
+                      value={pattern}
+                      onChange={(event) =>
+                        updateCustomGroupPattern(patternIndex, event.target.value)
+                      }
+                      placeholder="figma.com"
+                      className="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-950 outline-none focus:border-sky-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeCustomGroupPatternInput(patternIndex)}
+                      className="rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCreateCustomGroup}
+              disabled={isSaving}
+              className="mt-4 rounded-md bg-sky-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              Create group
+            </button>
           </section>
 
           <section className="grid gap-4">
@@ -498,4 +766,40 @@ function getFirstEditableCategoryId(categories: TabCategoryRule[]) {
   return (
     categories.find((category) => category.id !== fallbackCategoryId)?.id ?? ''
   )
+}
+
+function getIncludeableCategories(categories: TabCategoryRule[]) {
+  return categories.filter(
+    (category) =>
+      category.id !== fallbackCategoryId && !category.id.startsWith('custom-'),
+  )
+}
+
+async function applySettingsToCurrentWindow() {
+  await organizeCurrentWindowTabs()
+}
+
+function normalizePatternInputs(patterns: string[]) {
+  return patterns
+    .map((pattern) => pattern.trim())
+    .filter((pattern, index, allPatterns) => {
+      if (pattern.length === 0) {
+        return false
+      }
+
+      return (
+        allPatterns.findIndex(
+          (currentPattern) =>
+            currentPattern.trim().toLowerCase() === pattern.toLowerCase(),
+        ) === index
+      )
+    })
+}
+
+function createCustomCategoryId(): TabCategoryId {
+  if (crypto.randomUUID) {
+    return `custom-${crypto.randomUUID()}`
+  }
+
+  return `custom-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }

@@ -1,4 +1,4 @@
-export type TabCategoryId =
+export type BuiltInTabCategoryId =
   | 'git'
   | 'ai'
   | 'dev'
@@ -9,6 +9,8 @@ export type TabCategoryId =
   | 'portfolio'
   | 'other'
 
+export type TabCategoryId = BuiltInTabCategoryId | `custom-${string}`
+
 export type TabGroupColor = `${chrome.tabGroups.Color}`
 
 export type TabCategoryRule = {
@@ -16,6 +18,7 @@ export type TabCategoryRule = {
   name: string
   color: TabGroupColor
   patterns: string[]
+  includedCategoryIds?: TabCategoryId[]
 }
 
 export type TabCategoryMatch = {
@@ -23,7 +26,7 @@ export type TabCategoryMatch = {
   color: TabGroupColor
 }
 
-export const fallbackCategoryId: TabCategoryId = 'other'
+export const fallbackCategoryId: BuiltInTabCategoryId = 'other'
 
 export const tabGroupColors: TabGroupColor[] = [
   'grey',
@@ -136,13 +139,24 @@ export function classifyTab(
 ): TabCategoryMatch {
   const searchableText = `${tab.url ?? ''} ${tab.title ?? ''}`.toLowerCase()
   const fallbackCategory = getFallbackCategory(categories)
-  const matchedCategory = categories
-    .filter((category) => category.id !== fallbackCategoryId)
-    .find((category) =>
-      category.patterns.some((pattern) =>
+  const categoriesById = new Map(
+    categories.map((category) => [category.id, category]),
+  )
+  const categoriesByPriority = [
+    ...categories.filter(isCustomCategory),
+    ...categories.filter(
+      (category) =>
+        category.id !== fallbackCategoryId && !isCustomCategory(category),
+    ),
+  ]
+  const matchedCategory = categoriesByPriority
+    .find((category) => {
+      const patterns = getCategoryPatterns(category, categoriesById)
+
+      return patterns.some((pattern) =>
         searchableText.includes(pattern.toLowerCase()),
-      ),
-    )
+      )
+    })
 
   if (!matchedCategory) {
     return fallbackCategory
@@ -172,4 +186,20 @@ export function createDefaultCategoryRules(): TabCategoryRule[] {
     ...category,
     patterns: [...category.patterns],
   }))
+}
+
+function isCustomCategory(category: TabCategoryRule) {
+  return category.id.startsWith('custom-')
+}
+
+function getCategoryPatterns(
+  category: TabCategoryRule,
+  categoriesById: Map<TabCategoryId, TabCategoryRule>,
+) {
+  const includedPatterns =
+    category.includedCategoryIds?.flatMap(
+      (categoryId) => categoriesById.get(categoryId)?.patterns ?? [],
+    ) ?? []
+
+  return [...category.patterns, ...includedPatterns]
 }

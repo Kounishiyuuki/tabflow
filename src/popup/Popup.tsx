@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { extensionDescription, extensionName } from '../lib/extension'
 import { organizeCurrentWindowTabs } from '../lib/organizeTabs'
+import {
+  loadAutoOrganizeEnabled,
+  saveAutoOrganizeEnabled,
+} from '../lib/settings'
 
 type PopupStatus = {
   tone: 'idle' | 'success' | 'error'
@@ -11,10 +15,29 @@ type PopupStatus = {
 
 export function Popup() {
   const [isOrganizing, setIsOrganizing] = useState(false)
+  const [isAutoOrganizeEnabled, setIsAutoOrganizeEnabled] = useState(false)
+  const [isLoadingAutoOrganize, setIsLoadingAutoOrganize] = useState(true)
   const [status, setStatus] = useState<PopupStatus>({
     tone: 'idle',
     message: 'Ready to organize unpinned tabs in this window.',
   })
+
+  useEffect(() => {
+    loadAutoOrganizeEnabled()
+      .then(setIsAutoOrganizeEnabled)
+      .catch((error: unknown) => {
+        setStatus({
+          tone: 'error',
+          message:
+            error instanceof Error
+              ? `Unable to load auto-organize setting: ${error.message}`
+              : 'Unable to load auto-organize setting.',
+        })
+      })
+      .finally(() => {
+        setIsLoadingAutoOrganize(false)
+      })
+  }, [])
 
   async function handleOrganizeTabs() {
     setIsOrganizing(true)
@@ -56,6 +79,37 @@ export function Popup() {
     chrome.runtime.openOptionsPage()
   }
 
+  async function handleToggleAutoOrganize() {
+    const nextValue = !isAutoOrganizeEnabled
+    setIsLoadingAutoOrganize(true)
+
+    try {
+      await saveAutoOrganizeEnabled(nextValue)
+      setIsAutoOrganizeEnabled(nextValue)
+      setStatus({
+        tone: 'success',
+        message: nextValue
+          ? 'Auto-organize enabled for new and updated tabs.'
+          : 'Auto-organize disabled. Manual organizing still works.',
+      })
+    } catch (error) {
+      setStatus({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? `Unable to save auto-organize setting: ${error.message}`
+            : 'Unable to save auto-organize setting.',
+      })
+    } finally {
+      setIsLoadingAutoOrganize(false)
+    }
+  }
+
+  const autoOrganizeLabel = isAutoOrganizeEnabled ? 'On' : 'Off'
+  const autoOrganizeBadgeClassName = isAutoOrganizeEnabled
+    ? 'border-green-200 bg-green-50 text-green-800'
+    : 'border-amber-200 bg-amber-50 text-amber-800'
+
   return (
     <main className="w-88 space-y-4 bg-slate-50 p-4">
       <header className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -68,20 +122,44 @@ export function Popup() {
               {extensionName}
             </h1>
           </div>
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
-            Manual
+          <span
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${autoOrganizeBadgeClassName}`}
+          >
+            Auto {autoOrganizeLabel}
           </span>
         </div>
         <p className="text-sm leading-6 text-slate-600">
           {extensionDescription}
         </p>
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Auto-organize
-          </p>
-          <p className="mt-1 text-sm font-medium text-slate-900">
-            Off. Use Organize now when you want to group this window.
-          </p>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Auto-organize
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-900">
+                {isAutoOrganizeEnabled
+                  ? 'New and updated tabs are grouped automatically.'
+                  : 'Off. Use Organize now or enable the toggle.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isAutoOrganizeEnabled}
+              onClick={handleToggleAutoOrganize}
+              disabled={isLoadingAutoOrganize}
+              className={`relative h-6 w-11 rounded-full transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                isAutoOrganizeEnabled ? 'bg-sky-700' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${
+                  isAutoOrganizeEnabled ? 'left-6' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
         </div>
       </header>
 
