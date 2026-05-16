@@ -1,4 +1,37 @@
-# React + TypeScript + Vite
+# TabFlow
+
+TabFlow is a Chrome Extension starter built with Vite, React, TypeScript,
+Tailwind CSS, and Chrome Extension Manifest V3.
+
+## Local Chrome Testing
+
+To install and load the extension locally:
+
+1. Run `npm install`.
+2. Run `npm run build`.
+3. Open Chrome and go to `chrome://extensions/`.
+4. Turn on **Developer mode**.
+5. Click **Load unpacked**.
+6. Select the generated `dist` folder from this project.
+7. After each new build, return to `chrome://extensions/` and reload the
+   extension.
+
+The popup is available from the extension toolbar icon. The options page is
+available from the extension details page in Chrome.
+
+## Local Testing Checklist
+
+- Extension loads without errors.
+- Popup opens from the extension toolbar icon.
+- Options page opens from the extension details page.
+- Background service worker is registered in the extension details page.
+
+## Development Notes
+
+This project currently contains only the initial extension structure. Tab
+grouping logic has not been implemented yet.
+
+## Original Vite Notes
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
