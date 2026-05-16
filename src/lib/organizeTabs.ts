@@ -1,11 +1,15 @@
-import { classifyTab, fallbackCategory, type TabCategoryName } from './categories'
+import { classifyTab, type TabCategoryMatch } from './categories'
+import { loadCategoryRules } from './settings'
 
 export type OrganizeTabsResult = {
   ok: boolean
   message: string
+  groupedTabCount: number
+  groupCount: number
 }
 
 export async function organizeCurrentWindowTabs(): Promise<OrganizeTabsResult> {
+  const categoryRules = await loadCategoryRules()
   const tabs = await chrome.tabs.query({ currentWindow: true })
   const tabsToOrganize = tabs.filter((tab) => !tab.pinned && tab.id !== undefined)
 
@@ -13,16 +17,20 @@ export async function organizeCurrentWindowTabs(): Promise<OrganizeTabsResult> {
     return {
       ok: true,
       message: 'No unpinned tabs to organize.',
+      groupedTabCount: 0,
+      groupCount: 0,
     }
   }
 
-  const tabsByCategory = new Map<TabCategoryName, chrome.tabs.Tab[]>()
+  const tabsByCategory = new Map<string, chrome.tabs.Tab[]>()
+  const categoriesByName = new Map<string, TabCategoryMatch>()
 
   for (const tab of tabsToOrganize) {
-    const category = classifyTab(tab)
+    const category = classifyTab(tab, categoryRules)
     const categoryTabs = tabsByCategory.get(category.name) ?? []
     categoryTabs.push(tab)
     tabsByCategory.set(category.name, categoryTabs)
+    categoriesByName.set(category.name, category)
   }
 
   for (const [categoryName, categoryTabs] of tabsByCategory) {
@@ -34,11 +42,7 @@ export async function organizeCurrentWindowTabs(): Promise<OrganizeTabsResult> {
       continue
     }
 
-    const firstTabCategory = classifyTab(categoryTabs[0])
-    const color =
-      categoryName === fallbackCategory.name
-        ? fallbackCategory.color
-        : firstTabCategory.color
+    const color = categoriesByName.get(categoryName)?.color ?? 'grey'
     const groupId = await chrome.tabs.group({
       tabIds: toTabGroupIds(tabIds),
     })
@@ -52,6 +56,8 @@ export async function organizeCurrentWindowTabs(): Promise<OrganizeTabsResult> {
   return {
     ok: true,
     message: `Organized ${tabsToOrganize.length} tabs into ${tabsByCategory.size} groups.`,
+    groupedTabCount: tabsToOrganize.length,
+    groupCount: tabsByCategory.size,
   }
 }
 

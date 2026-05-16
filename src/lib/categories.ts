@@ -1,58 +1,175 @@
-export type TabCategoryName = 'Dev' | 'AI' | 'School' | 'SNS' | 'Other'
+export type TabCategoryId =
+  | 'git'
+  | 'ai'
+  | 'dev'
+  | 'infra'
+  | 'school'
+  | 'sns'
+  | 'design'
+  | 'portfolio'
+  | 'other'
 
 export type TabGroupColor = `${chrome.tabGroups.Color}`
 
 export type TabCategoryRule = {
-  category: Exclude<TabCategoryName, 'Other'>
+  id: TabCategoryId
+  name: string
   color: TabGroupColor
-  matches: string[]
+  patterns: string[]
 }
 
-export type TabCategory = {
-  name: TabCategoryName
+export type TabCategoryMatch = {
+  name: string
   color: TabGroupColor
 }
 
-export const fallbackCategory: TabCategory = {
-  name: 'Other',
-  color: 'grey',
-}
+export const fallbackCategoryId: TabCategoryId = 'other'
+
+export const tabGroupColors: TabGroupColor[] = [
+  'grey',
+  'blue',
+  'red',
+  'yellow',
+  'green',
+  'pink',
+  'purple',
+  'cyan',
+  'orange',
+]
 
 export const defaultCategoryRules: TabCategoryRule[] = [
   {
-    category: 'Dev',
+    id: 'git',
+    name: 'Git',
     color: 'blue',
-    matches: ['github.com', 'localhost', 'vercel.app', 'supabase.com'],
+    patterns: [
+      'github.com',
+      'gitlab.com',
+      'bitbucket.org',
+      'gist.github.com',
+      'raw.githubusercontent.com',
+      'docs.github.com',
+    ],
   },
   {
-    category: 'AI',
+    id: 'ai',
+    name: 'AI',
     color: 'purple',
-    matches: ['chatgpt.com', 'claude.ai', 'gemini.google.com', 'openai.com'],
+    patterns: [
+      'chatgpt.com',
+      'claude.ai',
+      'gemini.google.com',
+      'openai.com',
+      'platform.openai.com',
+      'perplexity.ai',
+      'codex',
+    ],
   },
   {
-    category: 'School',
+    id: 'dev',
+    name: 'Dev',
+    color: 'cyan',
+    patterns: [
+      'localhost',
+      'npmjs.com',
+      'developer.mozilla.org',
+      'developer.chrome.com',
+      'stackoverflow.com',
+    ],
+  },
+  {
+    id: 'infra',
+    name: 'Infra',
+    color: 'orange',
+    patterns: [
+      'vercel.com',
+      'vercel.app',
+      'supabase.com',
+      'firebase.google.com',
+      'cloudflare.com',
+      'aws.amazon.com',
+    ],
+  },
+  {
+    id: 'school',
+    name: 'School',
     color: 'green',
-    matches: ['classroom.google.com', 'drive.google.com'],
+    patterns: [
+      'classroom.google.com',
+      'drive.google.com',
+      'portal',
+      'lms',
+      '学生',
+      '学修',
+      '授業',
+    ],
   },
   {
-    category: 'SNS',
+    id: 'sns',
+    name: 'SNS',
     color: 'red',
-    matches: ['youtube.com', 'x.com', 'instagram.com'],
+    patterns: ['youtube.com', 'x.com', 'instagram.com'],
+  },
+  {
+    id: 'design',
+    name: 'Design',
+    color: 'pink',
+    patterns: ['figma.com', 'stitch', 'canva.com', 'recraft.ai'],
+  },
+  {
+    id: 'portfolio',
+    name: 'Portfolio',
+    color: 'yellow',
+    patterns: ['portfolio', 'github.io', 'kounishiyuuki', 'personal-site'],
+  },
+  {
+    id: fallbackCategoryId,
+    name: 'Other',
+    color: 'grey',
+    patterns: [],
   },
 ]
 
-export function classifyTab(tab: Pick<chrome.tabs.Tab, 'title' | 'url'>): TabCategory {
+export function classifyTab(
+  tab: Pick<chrome.tabs.Tab, 'title' | 'url'>,
+  categories: TabCategoryRule[],
+): TabCategoryMatch {
   const searchableText = `${tab.url ?? ''} ${tab.title ?? ''}`.toLowerCase()
-  const matchedRule = defaultCategoryRules.find((rule) =>
-    rule.matches.some((match) => searchableText.includes(match)),
-  )
+  const fallbackCategory = getFallbackCategory(categories)
+  const matchedCategory = categories
+    .filter((category) => category.id !== fallbackCategoryId)
+    .find((category) =>
+      category.patterns.some((pattern) =>
+        searchableText.includes(pattern.toLowerCase()),
+      ),
+    )
 
-  if (!matchedRule) {
+  if (!matchedCategory) {
     return fallbackCategory
   }
 
   return {
-    name: matchedRule.category,
-    color: matchedRule.color,
+    name: matchedCategory.name,
+    color: matchedCategory.color,
   }
+}
+
+export function getFallbackCategory(
+  categories: TabCategoryRule[],
+): TabCategoryMatch {
+  const fallbackCategory =
+    categories.find((category) => category.id === fallbackCategoryId) ??
+    defaultCategoryRules.find((category) => category.id === fallbackCategoryId)
+
+  return {
+    name: fallbackCategory?.name ?? 'Other',
+    color: fallbackCategory?.color ?? 'grey',
+  }
+}
+
+export function createDefaultCategoryRules(): TabCategoryRule[] {
+  return defaultCategoryRules.map((category) => ({
+    ...category,
+    patterns: [...category.patterns],
+  }))
 }
