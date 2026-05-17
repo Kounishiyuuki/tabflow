@@ -1,7 +1,8 @@
 import { autoOrganizeWindowTabsByThreshold } from '../lib/organizeTabs'
 import {
-  loadAutoOrganizeEnabled,
-  loadAutoOrganizeThreshold,
+  loadTabFlowSettings,
+  tabFlowSettingsStorageKeys,
+  type TabFlowSettings,
 } from '../lib/settings'
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -12,6 +13,22 @@ const pendingWindowTimers = new Map<number, number>()
 const organizingWindowIds = new Set<number>()
 const debounceDelayMs = 750
 const logPrefix = '[TabFlow auto-organize]'
+let cachedSettings: TabFlowSettings | undefined
+let settingsLoadPromise: Promise<TabFlowSettings> | undefined
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'sync') {
+    return
+  }
+
+  const relevantKeys = Object.values(tabFlowSettingsStorageKeys)
+  const shouldRefreshSettings = relevantKeys.some((key) => key in changes)
+
+  if (shouldRefreshSettings) {
+    cachedSettings = undefined
+    settingsLoadPromise = undefined
+  }
+})
 
 chrome.tabs.onCreated.addListener((tab) => {
   scheduleAutoOrganize('tabs.onCreated', tab.windowId)
@@ -32,7 +49,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener((_tabId, removeInfo) => {
   if (removeInfo.windowId < 0) {
-    console.info(logPrefix, 'skip: removed tab has no active window')
+    debugLog('skip: removed tab has no active window')
     return
   }
 
@@ -41,13 +58,12 @@ chrome.tabs.onRemoved.addListener((_tabId, removeInfo) => {
 
 function scheduleAutoOrganize(eventType: string, windowId: number) {
   if (windowId < 0) {
-    console.info(logPrefix, 'event:', eventType, 'skip: invalid window id', windowId)
+    debugLog('event:', eventType, 'skip: invalid window id', windowId)
     return
   }
 
   if (organizingWindowIds.has(windowId)) {
-    console.info(
-      logPrefix,
+    debugLog(
       'event:',
       eventType,
       'window:',
@@ -57,46 +73,67 @@ function scheduleAutoOrganize(eventType: string, windowId: number) {
     return
   }
 
-  console.info(logPrefix, 'event:', eventType, 'schedule window:', windowId)
+  void getCachedSettings()
+    .then((settings) => {
+      if (!settings.autoOrganizeEnabled) {
+        debugLog('event:', eventType, 'skip: disabled')
+        return
+      }
 
-  const existingTimer = pendingWindowTimers.get(windowId)
+      debugLog('event:', eventType, 'schedule window:', windowId)
 
-  if (existingTimer !== undefined) {
-    clearTimeout(existingTimer)
-  }
+      const existingTimer = pendingWindowTimers.get(windowId)
 
-  const timer = setTimeout(() => {
-    pendingWindowTimers.delete(windowId)
-    void organizeWindowIfReady(windowId)
-  }, debounceDelayMs)
+      if (existingTimer !== undefined) {
+        clearTimeout(existingTimer)
+      }
 
-  pendingWindowTimers.set(windowId, timer)
+      const timer = setTimeout(() => {
+        pendingWindowTimers.delete(windowId)
+        void organizeWindowIfReady(windowId)
+      }, debounceDelayMs)
+
+      pendingWindowTimers.set(windowId, timer)
+    })
+    .catch((error) => {
+      console.error('TabFlow failed to read auto-organize settings.', error)
+    })
 }
 
 async function organizeWindowIfReady(windowId: number) {
   if (organizingWindowIds.has(windowId)) {
-    console.info(logPrefix, 'window:', windowId, 'skip: already organizing')
+    debugLog('window:', windowId, 'skip: already organizing')
     return
   }
 
-  const isAutoOrganizeEnabled = await loadAutoOrganizeEnabled()
+  const settings = await getCachedSettings()
 
-  console.info(logPrefix, 'enabled:', isAutoOrganizeEnabled, 'window:', windowId)
+  debugLog(
+    'enabled:',
+    settings.autoOrganizeEnabled,
+    'threshold:',
+    settings.autoOrganizeThreshold,
+    'window:',
+    windowId,
+  )
 
-  if (!isAutoOrganizeEnabled) {
-    console.info(logPrefix, 'skip: disabled')
+  if (!settings.autoOrganizeEnabled) {
+    debugLog('skip: disabled')
     return
   }
 
   try {
-    const threshold = await loadAutoOrganizeThreshold()
     organizingWindowIds.add(windowId)
-    const result = await autoOrganizeWindowTabsByThreshold(windowId, threshold)
+    const result = await autoOrganizeWindowTabsByThreshold(
+      windowId,
+      settings.autoOrganizeThreshold,
+      settings.categories,
+      settings.debugLogsEnabled,
+    )
 
-    console.info(
-      logPrefix,
+    debugLog(
       'threshold:',
-      threshold,
+      settings.autoOrganizeThreshold,
       'nonPinnedTabs:',
       result.inspectedTabCount ?? 0,
       'inspected:',
@@ -108,11 +145,27 @@ async function organizeWindowIfReady(windowId: number) {
     )
 
     if ((result.selectedCategoryNames ?? []).length === 0) {
-      console.info(logPrefix, 'skip:', result.message)
+      debugLog('skip:', result.message)
     }
   } catch (error) {
     console.error('TabFlow auto-organize failed.', error)
   } finally {
     organizingWindowIds.delete(windowId)
+  }
+}
+
+async function getCachedSettings() {
+  if (cachedSettings !== undefined) {
+    return cachedSettings
+  }
+
+  settingsLoadPromise ??= loadTabFlowSettings()
+  cachedSettings = await settingsLoadPromise
+  return cachedSettings
+}
+
+function debugLog(...args: unknown[]) {
+  if (cachedSettings?.debugLogsEnabled) {
+    console.info(logPrefix, ...args)
   }
 }

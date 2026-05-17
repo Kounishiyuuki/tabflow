@@ -2,6 +2,8 @@ import {
   classifyTab,
   getFallbackCategory,
   type TabCategoryMatch,
+  type TabCategoryRule,
+  type TabGroupColor,
 } from './categories'
 import { loadCategoryRules } from './settings'
 
@@ -35,9 +37,11 @@ export async function organizeWindowTabs(
 export async function autoOrganizeWindowTabsByThreshold(
   windowId: number,
   threshold: number,
+  categoryRules?: TabCategoryRule[],
+  shouldCollectDebugInfo = false,
 ): Promise<OrganizeTabsResult> {
-  const categoryRules = await loadCategoryRules()
-  const fallbackCategory = getFallbackCategory(categoryRules)
+  const rules = categoryRules ?? (await loadCategoryRules())
+  const fallbackCategory = getFallbackCategory(rules)
   const tabs = await chrome.tabs.query({ windowId })
   const tabsToInspect = tabs.filter((tab) => !tab.pinned && tab.id !== undefined)
   const tabsByCategory = new Map<string, chrome.tabs.Tab[]>()
@@ -45,15 +49,17 @@ export async function autoOrganizeWindowTabsByThreshold(
   const inspectedTabs: NonNullable<OrganizeTabsResult['inspectedTabs']> = []
 
   for (const tab of tabsToInspect) {
-    const category = classifyTab(tab, categoryRules)
+    const category = classifyTab(tab, rules)
 
-    inspectedTabs.push({
-      group: category.name,
-      matchedPattern: category.matchedPattern,
-      reason: category.reason,
-      title: tab.title,
-      url: tab.url,
-    })
+    if (shouldCollectDebugInfo) {
+      inspectedTabs.push({
+        group: category.name,
+        matchedPattern: category.matchedPattern,
+        reason: category.reason,
+        title: tab.title,
+        url: tab.url,
+      })
+    }
 
     if (category.name === fallbackCategory.name) {
       continue
@@ -74,22 +80,30 @@ export async function autoOrganizeWindowTabsByThreshold(
       continue
     }
 
-    await groupTabs(categoryName, categoryTabs, categoriesByName)
-    groupedTabCount += categoryTabs.length
-    groupCount += 1
     selectedCategoryNames.push(categoryName)
+
+    const groupedTabs = await groupTabs(categoryName, categoryTabs, categoriesByName)
+
+    if (groupedTabs > 0) {
+      groupedTabCount += groupedTabs
+      groupCount += 1
+    }
   }
+
+  const message =
+    selectedCategoryNames.length === 0
+      ? `No group reached the ${threshold}-tab threshold.`
+      : groupedTabCount === 0
+        ? 'Matching groups are already organized.'
+        : `Auto-organized ${groupedTabCount} tabs into ${groupCount} groups.`
 
   return {
     ok: true,
-    message:
-      groupCount === 0
-        ? `No group reached the ${threshold}-tab threshold.`
-        : `Auto-organized ${groupedTabCount} tabs into ${groupCount} groups.`,
+    message,
     groupedTabCount,
     groupCount,
     inspectedTabCount: tabsToInspect.length,
-    inspectedTabs,
+    inspectedTabs: shouldCollectDebugInfo ? inspectedTabs : undefined,
     categoryCounts: Object.fromEntries(
       Array.from(tabsByCategory, ([categoryName, categoryTabs]) => [
         categoryName,
@@ -143,58 +157,61 @@ async function groupTabs(
   categoryName: string,
   categoryTabs: chrome.tabs.Tab[],
   categoriesByName: Map<string, TabCategoryMatch>,
-) {
+): Promise<number> {
   const tabIds = categoryTabs
     .map((tab) => tab.id)
     .filter((tabId): tabId is number => tabId !== undefined)
 
   if (tabIds.length === 0) {
-    return
+    return 0
   }
 
   const color = categoriesByName.get(categoryName)?.color ?? 'grey'
-  console.info('[TabFlow groupTabs] grouping', {
-    categoryName,
-    color,
-    tabIds,
-  })
-  let groupId: number
+  const windowId = categoryTabs[0]?.windowId
+  const existingGroup = await findMatchingGroup(windowId, categoryName, color)
+  const tabsToMove = existingGroup
+    ? categoryTabs.filter((tab) => tab.groupId !== existingGroup.id)
+    : categoryTabs
+  const tabIdsToMove = tabsToMove
+    .map((tab) => tab.id)
+    .filter((tabId): tabId is number => tabId !== undefined)
 
-  try {
-    groupId = await chrome.tabs.group({
-      tabIds: toTabGroupIds(tabIds),
-    })
-  } catch (error) {
-    console.error(
-      '[TabFlow groupTabs] chrome.tabs.group failed',
-      {
-        categoryName,
-        tabIds,
-        lastError: chrome.runtime.lastError?.message,
-      },
-      error,
-    )
-    throw error
+  if (existingGroup && tabIdsToMove.length === 0) {
+    if (existingGroup.color !== color) {
+      await chrome.tabGroups.update(existingGroup.id, { color })
+    }
+
+    return 0
+  }
+
+  if (tabIdsToMove.length === 0) {
+    return 0
   }
 
   try {
+    const groupId = await chrome.tabs.group({
+      tabIds: toTabGroupIds(tabIdsToMove),
+      ...(existingGroup ? { groupId: existingGroup.id } : {}),
+    })
+
     await chrome.tabGroups.update(groupId, {
       title: categoryName,
       color,
     })
   } catch (error) {
     console.error(
-      '[TabFlow groupTabs] chrome.tabGroups.update failed',
+      '[TabFlow groupTabs] grouping failed',
       {
         categoryName,
-        groupId,
-        color,
+        tabIds: tabIdsToMove,
         lastError: chrome.runtime.lastError?.message,
       },
       error,
     )
     throw error
   }
+
+  return tabIdsToMove.length
 }
 
 export async function organizeSingleTab(tab: chrome.tabs.Tab): Promise<void> {
@@ -229,12 +246,26 @@ async function findMatchingGroupId(
   windowId: number,
   categoryName: string,
 ): Promise<number | undefined> {
+  const existingGroups = await chrome.tabGroups.query({ title: categoryName, windowId })
+
+  return existingGroups[0]?.id
+}
+
+async function findMatchingGroup(
+  windowId: number | undefined,
+  categoryName: string,
+  color: TabGroupColor,
+): Promise<chrome.tabGroups.TabGroup | undefined> {
+  if (windowId === undefined) {
+    return undefined
+  }
+
   const existingGroups = await chrome.tabGroups.query({
     title: categoryName,
     windowId,
   })
 
-  return existingGroups[0]?.id
+  return existingGroups.find((group) => group.color === color) ?? existingGroups[0]
 }
 
 function toTabGroupIds(tabIds: number[]): number | [number, ...number[]] {

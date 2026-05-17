@@ -9,7 +9,14 @@ import {
 const storageKey = 'tabflowCategoryRules'
 const autoOrganizeStorageKey = 'tabflowAutoOrganizeEnabled'
 const autoOrganizeThresholdStorageKey = 'tabflowAutoOrganizeThreshold'
+const debugLogsStorageKey = 'tabflowDebugLogsEnabled'
 export const defaultAutoOrganizeThreshold = 8
+export const tabFlowSettingsStorageKeys = {
+  categories: storageKey,
+  autoOrganizeEnabled: autoOrganizeStorageKey,
+  autoOrganizeThreshold: autoOrganizeThresholdStorageKey,
+  debugLogsEnabled: debugLogsStorageKey,
+} as const
 
 type StoredCategoryRules = {
   [storageKey]?: TabCategoryRule[]
@@ -18,6 +25,39 @@ type StoredCategoryRules = {
 type StoredAutoOrganizeSetting = {
   [autoOrganizeStorageKey]?: boolean
   [autoOrganizeThresholdStorageKey]?: number
+  [debugLogsStorageKey]?: boolean
+}
+
+export type TabFlowSettings = {
+  autoOrganizeEnabled: boolean
+  autoOrganizeThreshold: number
+  categories: TabCategoryRule[]
+  debugLogsEnabled: boolean
+}
+
+export async function loadTabFlowSettings(): Promise<TabFlowSettings> {
+  const storedSettings = await chrome.storage.sync.get([
+    storageKey,
+    autoOrganizeStorageKey,
+    autoOrganizeThresholdStorageKey,
+    debugLogsStorageKey,
+  ])
+  const storedCategories = (storedSettings as StoredCategoryRules)[storageKey]
+  const storedAutoOrganizeSettings =
+    storedSettings as StoredAutoOrganizeSetting
+
+  return {
+    autoOrganizeEnabled:
+      storedAutoOrganizeSettings[autoOrganizeStorageKey] === true,
+    autoOrganizeThreshold: normalizeThreshold(
+      storedAutoOrganizeSettings[autoOrganizeThresholdStorageKey],
+    ),
+    categories: Array.isArray(storedCategories)
+      ? normalizeCategoryRules(storedCategories)
+      : createDefaultCategoryRules(),
+    debugLogsEnabled:
+      storedAutoOrganizeSettings[debugLogsStorageKey] === true,
+  }
 }
 
 export async function loadCategoryRules(): Promise<TabCategoryRule[]> {
