@@ -1,9 +1,20 @@
+<p align="center">
+  <img src="public/icons/icon128.png" alt="TabFlow icon" width="128" height="128" />
+</p>
+
+<p align="center">
+  TabFlowは、開きすぎたChromeタブを自動で整理する拡張機能です。
+</p>
+
 # TabFlow
 
 TabFlow is a Chrome Extension for organizing busy browser sessions into
 customizable Chrome Tab Groups. It combines rule-based tab classification,
 manual organizing, editable categories, custom groups, and threshold-based
 auto-organize behavior.
+
+The TabFlow icon is used in Chrome's extension list and toolbar after loading
+the extension locally.
 
 ## 日本語 Overview
 
