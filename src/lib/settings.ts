@@ -8,6 +8,8 @@ import {
 
 const storageKey = 'tabflowCategoryRules'
 const autoOrganizeStorageKey = 'tabflowAutoOrganizeEnabled'
+const autoOrganizeThresholdStorageKey = 'tabflowAutoOrganizeThreshold'
+export const defaultAutoOrganizeThreshold = 8
 
 type StoredCategoryRules = {
   [storageKey]?: TabCategoryRule[]
@@ -15,6 +17,7 @@ type StoredCategoryRules = {
 
 type StoredAutoOrganizeSetting = {
   [autoOrganizeStorageKey]?: boolean
+  [autoOrganizeThresholdStorageKey]?: number
 }
 
 export async function loadCategoryRules(): Promise<TabCategoryRule[]> {
@@ -59,6 +62,25 @@ export async function saveAutoOrganizeEnabled(
   })
 }
 
+export async function loadAutoOrganizeThreshold(): Promise<number> {
+  const storedSettings = await chrome.storage.sync.get(
+    autoOrganizeThresholdStorageKey,
+  )
+  const storedValue = (storedSettings as StoredAutoOrganizeSetting)[
+    autoOrganizeThresholdStorageKey
+  ]
+
+  return normalizeThreshold(storedValue)
+}
+
+export async function saveAutoOrganizeThreshold(
+  threshold: number,
+): Promise<void> {
+  await chrome.storage.sync.set({
+    [autoOrganizeThresholdStorageKey]: normalizeThreshold(threshold),
+  })
+}
+
 function normalizeCategoryRules(categories: TabCategoryRule[]): TabCategoryRule[] {
   const defaultCategories = createDefaultCategoryRules()
   const categoriesById = new Map(
@@ -80,7 +102,7 @@ function normalizeCategoryRules(categories: TabCategoryRule[]): TabCategoryRule[
       patterns:
         defaultCategory.id === fallbackCategoryId
           ? []
-          : normalizePatterns(savedCategory.patterns),
+          : mergePatterns(defaultCategory.patterns, savedCategory.patterns),
     }
   })
 
@@ -163,4 +185,16 @@ function normalizePatterns(patterns: string[]): string[] {
         ) === index
       )
     })
+}
+
+function mergePatterns(defaultPatterns: string[], savedPatterns: string[]) {
+  return normalizePatterns([...defaultPatterns, ...savedPatterns])
+}
+
+function normalizeThreshold(threshold: unknown) {
+  if (typeof threshold !== 'number' || !Number.isFinite(threshold)) {
+    return defaultAutoOrganizeThreshold
+  }
+
+  return Math.max(1, Math.round(threshold))
 }

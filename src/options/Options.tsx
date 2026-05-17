@@ -59,6 +59,16 @@ export function Options() {
   }, [])
 
   async function handleSave() {
+    const validationError = validateCustomGroups(categories)
+
+    if (validationError) {
+      setStatus({
+        tone: 'error',
+        message: validationError,
+      })
+      return
+    }
+
     setIsSaving(true)
 
     try {
@@ -331,6 +341,59 @@ export function Options() {
         }
       }),
     )
+  }
+
+  function toggleCategoryIncludedCategory(
+    customCategoryId: string,
+    includedCategoryId: TabCategoryId,
+  ) {
+    setCategories((currentCategories) =>
+      currentCategories.map((category) => {
+        if (category.id !== customCategoryId) {
+          return category
+        }
+
+        const currentIncludedCategoryIds = category.includedCategoryIds ?? []
+        const includedCategoryIds = currentIncludedCategoryIds.includes(
+          includedCategoryId,
+        )
+          ? currentIncludedCategoryIds.filter(
+              (categoryId) => categoryId !== includedCategoryId,
+            )
+          : [...currentIncludedCategoryIds, includedCategoryId]
+
+        return {
+          ...category,
+          includedCategoryIds,
+        }
+      }),
+    )
+  }
+
+  function deleteCustomGroup(categoryId: string) {
+    const category = categories.find(
+      (currentCategory) => currentCategory.id === categoryId,
+    )
+
+    if (!category || !category.id.startsWith('custom-')) {
+      return
+    }
+
+    const shouldDelete = window.confirm(`Delete custom group ${category.name}?`)
+
+    if (!shouldDelete) {
+      return
+    }
+
+    setCategories((currentCategories) =>
+      currentCategories.filter(
+        (currentCategory) => currentCategory.id !== categoryId,
+      ),
+    )
+    setStatus({
+      tone: 'idle',
+      message: 'Custom group removed. Save settings to persist this change.',
+    })
   }
 
   function updateCategory(
@@ -622,6 +685,7 @@ export function Options() {
           <section className="grid gap-4">
             {categories.map((category) => {
               const isFallback = category.id === fallbackCategoryId
+              const isCustom = category.id.startsWith('custom-')
 
               return (
                 <article
@@ -636,12 +700,31 @@ export function Options() {
                       <p className="mt-1 text-sm text-slate-500">
                         {isFallback
                           ? 'Fallback group for tabs without a match.'
-                          : `${category.patterns.length} pattern${category.patterns.length === 1 ? '' : 's'}`}
+                          : `${category.patterns.length} manual pattern${category.patterns.length === 1 ? '' : 's'}${
+                              isCustom
+                                ? `, ${category.includedCategoryIds?.length ?? 0} included categor${
+                                    (category.includedCategoryIds?.length ?? 0) === 1
+                                      ? 'y'
+                                      : 'ies'
+                                  }`
+                                : ''
+                            }`}
                       </p>
                     </div>
-                    <span className="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium capitalize text-slate-700">
-                      {category.color}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium capitalize text-slate-700">
+                        {category.color}
+                      </span>
+                      {isCustom ? (
+                        <button
+                          type="button"
+                          onClick={() => deleteCustomGroup(category.id)}
+                          className="rounded-md border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-[1fr_180px]">
@@ -685,6 +768,42 @@ export function Options() {
                   </div>
 
                   <div className="mt-5">
+                    {isCustom ? (
+                      <div className="mb-5">
+                        <h3 className="text-sm font-semibold text-slate-900">
+                          Included categories
+                        </h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                          Included category patterns also match this custom
+                          group.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {getIncludeableCategories(categories).map(
+                            (includedCategory) => (
+                              <label
+                                key={includedCategory.id}
+                                className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={(
+                                    category.includedCategoryIds ?? []
+                                  ).includes(includedCategory.id)}
+                                  onChange={() =>
+                                    toggleCategoryIncludedCategory(
+                                      category.id,
+                                      includedCategory.id,
+                                    )
+                                  }
+                                />
+                                {includedCategory.name}
+                              </label>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-semibold text-slate-900">
@@ -802,4 +921,38 @@ function createCustomCategoryId(): TabCategoryId {
   }
 
   return `custom-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function validateCustomGroups(categories: TabCategoryRule[]) {
+  const seenNames = new Set<string>()
+
+  for (const category of categories) {
+    const normalizedName = category.name.trim().toLowerCase()
+
+    if (category.id !== fallbackCategoryId && normalizedName.length === 0) {
+      return 'Category names cannot be empty.'
+    }
+
+    if (seenNames.has(normalizedName)) {
+      return `${category.name} is already used. Category names must be unique.`
+    }
+
+    seenNames.add(normalizedName)
+
+    if (!category.id.startsWith('custom-')) {
+      continue
+    }
+
+    const hasManualPatterns = category.patterns.some(
+      (pattern) => pattern.trim().length > 0,
+    )
+    const hasIncludedCategories =
+      (category.includedCategoryIds ?? []).length > 0
+
+    if (!hasManualPatterns && !hasIncludedCategories) {
+      return `${category.name} needs at least one manual pattern or included category.`
+    }
+  }
+
+  return undefined
 }

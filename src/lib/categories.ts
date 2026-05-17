@@ -24,6 +24,8 @@ export type TabCategoryRule = {
 export type TabCategoryMatch = {
   name: string
   color: TabGroupColor
+  matchedPattern?: string
+  reason?: string
 }
 
 export const fallbackCategoryId: BuiltInTabCategoryId = 'other'
@@ -111,7 +113,7 @@ export const defaultCategoryRules: TabCategoryRule[] = [
     id: 'sns',
     name: 'SNS',
     color: 'red',
-    patterns: ['youtube.com', 'x.com', 'instagram.com'],
+    patterns: ['youtube.com', 'youtu.be', 'x.com', 'twitter.com', 'instagram.com'],
   },
   {
     id: 'design',
@@ -150,21 +152,31 @@ export function classifyTab(
     ),
   ]
   const matchedCategory = categoriesByPriority
-    .find((category) => {
+    .map((category) => {
       const patterns = getCategoryPatterns(category, categoriesById)
-
-      return patterns.some((pattern) =>
+      const matchedPattern = patterns.find((pattern) =>
         searchableText.includes(pattern.toLowerCase()),
       )
+
+      return {
+        category,
+        matchedPattern,
+      }
     })
+    .find((match) => match.matchedPattern !== undefined)
 
   if (!matchedCategory) {
-    return fallbackCategory
+    return {
+      ...fallbackCategory,
+      reason: 'No category pattern matched the tab URL or title.',
+    }
   }
 
   return {
-    name: matchedCategory.name,
-    color: matchedCategory.color,
+    name: matchedCategory.category.name,
+    color: matchedCategory.category.color,
+    matchedPattern: matchedCategory.matchedPattern,
+    reason: `Matched pattern "${matchedCategory.matchedPattern}".`,
   }
 }
 

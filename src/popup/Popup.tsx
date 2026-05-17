@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import { extensionDescription, extensionName } from '../lib/extension'
 import { organizeCurrentWindowTabs } from '../lib/organizeTabs'
 import {
+  defaultAutoOrganizeThreshold,
   loadAutoOrganizeEnabled,
+  loadAutoOrganizeThreshold,
   saveAutoOrganizeEnabled,
+  saveAutoOrganizeThreshold,
 } from '../lib/settings'
 
 type PopupStatus = {
@@ -16,6 +19,9 @@ type PopupStatus = {
 export function Popup() {
   const [isOrganizing, setIsOrganizing] = useState(false)
   const [isAutoOrganizeEnabled, setIsAutoOrganizeEnabled] = useState(false)
+  const [autoOrganizeThreshold, setAutoOrganizeThreshold] = useState(
+    defaultAutoOrganizeThreshold,
+  )
   const [isLoadingAutoOrganize, setIsLoadingAutoOrganize] = useState(true)
   const [status, setStatus] = useState<PopupStatus>({
     tone: 'idle',
@@ -23,8 +29,11 @@ export function Popup() {
   })
 
   useEffect(() => {
-    loadAutoOrganizeEnabled()
-      .then(setIsAutoOrganizeEnabled)
+    Promise.all([loadAutoOrganizeEnabled(), loadAutoOrganizeThreshold()])
+      .then(([isEnabled, threshold]) => {
+        setIsAutoOrganizeEnabled(isEnabled)
+        setAutoOrganizeThreshold(threshold)
+      })
       .catch((error: unknown) => {
         setStatus({
           tone: 'error',
@@ -65,6 +74,27 @@ export function Popup() {
       })
     } finally {
       setIsOrganizing(false)
+    }
+  }
+
+  async function handleThresholdChange(thresholdValue: string) {
+    const nextThreshold = Math.max(1, Math.round(Number(thresholdValue) || 1))
+    setAutoOrganizeThreshold(nextThreshold)
+
+    try {
+      await saveAutoOrganizeThreshold(nextThreshold)
+      setStatus({
+        tone: 'success',
+        message: `Auto-organize threshold set to ${nextThreshold} tabs.`,
+      })
+    } catch (error) {
+      setStatus({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? `Unable to save threshold: ${error.message}`
+            : 'Unable to save threshold.',
+      })
     }
   }
 
@@ -139,8 +169,8 @@ export function Popup() {
               </p>
               <p className="mt-1 text-sm font-medium text-slate-900">
                 {isAutoOrganizeEnabled
-                  ? 'New and updated tabs are grouped automatically.'
-                  : 'Off. Use Organize now or enable the toggle.'}
+                  ? `Groups categories at ${autoOrganizeThreshold}+ matching tabs.`
+                  : `Off. Threshold is ${autoOrganizeThreshold} matching tabs.`}
               </p>
             </div>
             <button
@@ -160,6 +190,21 @@ export function Popup() {
               />
             </button>
           </div>
+          <label className="mt-3 grid gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Threshold
+            <input
+              type="number"
+              min="1"
+              value={autoOrganizeThreshold}
+              onChange={(event) => handleThresholdChange(event.target.value)}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-950 outline-none focus:border-sky-600"
+            />
+          </label>
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Manual Organize now organizes all tabs immediately. Auto organize
+            groups matching tabs when the same group reaches the threshold.
+            Example: threshold 3 groups three YouTube tabs into SNS.
+          </p>
         </div>
       </header>
 
