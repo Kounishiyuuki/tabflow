@@ -16,6 +16,17 @@ auto-organize behavior.
 The TabFlow icon is used in Chrome's extension list and toolbar after loading
 the extension locally.
 
+## Screenshots
+
+| Popup | Options |
+| --- | --- |
+| ![TabFlow popup](docs/screenshots/popup.png) | ![TabFlow options page](docs/screenshots/options.png) |
+| Popup画面。手動整理、Auto organize、Threshold設定を操作できる。 | カテゴリ編集画面。ルール追加、カスタムグループ作成、色変更ができる。 |
+
+![TabFlow organized tabs](docs/screenshots/organized-tabs.png)
+
+タブが自動でグループ化された状態。カテゴリごとに色付きのタブグループへ整理される。
+
 ## 日本語 Overview
 
 TabFlow は、開きすぎた Chrome タブを自動で見やすく整理する Chrome 拡張です。
